@@ -16,6 +16,8 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``SimulationCfg.warp_init_fn`` for installing MuJoCo Warp callbacks or
+  fixed extension state before CUDA graph capture.
 - Added ``GeomCfg``, exposed as the ``geoms`` field on ``EntityCfg``, a spec
   editor that matches geoms by name and patches their attributes. Supports
   ``group`` (so a geom can collide without being drawn) and all collision

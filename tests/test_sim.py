@@ -105,6 +105,29 @@ def test_default_broadphase_keeps_put_model_heuristic(robot_xml, device):
   assert sim.wp_model.opt.broadphase_filter == heuristic_opt.broadphase_filter
 
 
+def test_warp_initializer_runs_before_graph_capture(robot_xml, device, monkeypatch):
+  model = mujoco.MjModel.from_xml_string(robot_xml)
+  initialized = False
+
+  def initialize(wp_model, wp_data):
+    nonlocal initialized
+    initialized = wp_model is not None and wp_data is not None
+
+  create_graph = Simulation.create_graph
+
+  def assert_initialized(sim):
+    assert initialized
+    create_graph(sim)
+
+  monkeypatch.setattr(Simulation, "create_graph", assert_initialized)
+  Simulation(
+    num_envs=1,
+    cfg=SimulationCfg(warp_init_fn=initialize),
+    model=model,
+    device=device,
+  )
+
+
 def test_ls_parallel_is_deprecated():
   """Setting the removed ls_parallel option warns instead of erroring."""
   with pytest.warns(DeprecationWarning, match="ls_parallel"):
