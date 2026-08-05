@@ -171,7 +171,9 @@ class SimulationCfg:
   """Bounding-volume filters applied during broadphase collision checking.
 
   If None, use the MuJoCo Warp default."""
-  warp_init_fn: Callable[[mjwarp.Model, mjwarp.Data], None] | None = None
+  warp_init_fn: Callable[[mujoco.MjModel, mjwarp.Model, mjwarp.Data], None] | None = (
+    None
+  )
   """Optional Warp model/data initializer, called before CUDA graph capture."""
   ls_parallel: bool | None = None
   """Deprecated and ignored. Parallel linesearch was removed in MuJoCo Warp 3.10."""
@@ -334,7 +336,7 @@ class Simulation:
       njmax=self.cfg.njmax,
     )
     if self.cfg.warp_init_fn is not None:
-      self.cfg.warp_init_fn(self._wp_model, self._wp_data)
+      self.cfg.warp_init_fn(self._mj_model, self._wp_model, self._wp_data)
 
     self._reset_mask_wp = wp.zeros(self.num_envs, dtype=bool)
     self._reset_mask = TorchArray(self._reset_mask_wp)

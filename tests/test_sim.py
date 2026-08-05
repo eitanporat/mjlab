@@ -109,9 +109,9 @@ def test_warp_initializer_runs_before_graph_capture(robot_xml, device, monkeypat
   model = mujoco.MjModel.from_xml_string(robot_xml)
   initialized = False
 
-  def initialize(wp_model, wp_data):
+  def initialize(mj_model, wp_model, wp_data):
     nonlocal initialized
-    initialized = wp_model is not None and wp_data is not None
+    initialized = mj_model is model and wp_model is not None and wp_data is not None
 
   create_graph = Simulation.create_graph
 
