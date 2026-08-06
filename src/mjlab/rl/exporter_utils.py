@@ -5,7 +5,6 @@ import torch
 
 from mjlab.entity import Entity
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.envs.mdp.actions import JointPositionAction
 
 
 def list_to_csv_str(
@@ -44,8 +43,8 @@ def get_base_metadata(
     Dictionary of metadata fields that are common across all tasks.
   """
   robot: Entity = env.scene["robot"]
-  joint_action = env.action_manager.get_term("joint_pos")
-  assert isinstance(joint_action, JointPositionAction)
+  action = env.action_manager.get_term(env.action_manager.active_terms[0])
+  action_scale = getattr(action, "_scale", 1.0)
   # Build mapping from joint name to actuator ID for natural joint order.
   # Each spec actuator controls exactly one joint (via its target field).
   joint_name_to_ctrl_id = {}
@@ -99,9 +98,9 @@ def get_base_metadata(
     "observation_terms_flatten_history_dim": observation_term_flatten_history_dim,
     "observation_terms_history_length": observation_term_history_length,
     "observation_terms_clip": observation_term_clip,
-    "action_scale": joint_action._scale[0].cpu().tolist()
-    if isinstance(joint_action._scale, torch.Tensor)
-    else joint_action._scale,
+    "action_scale": action_scale[0].cpu().tolist()
+    if isinstance(action_scale, torch.Tensor)
+    else action_scale,
   }
 
 
