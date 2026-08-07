@@ -1,8 +1,11 @@
+import copy
+
 import torch
 from rsl_rl.env import VecEnv
 from tensordict import TensorDict
 
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+from mjlab.utils.spaces import Dict as DictSpace
 from mjlab.utils.spaces import Space
 
 
@@ -16,6 +19,7 @@ class RslRlVecEnvWrapper(VecEnv):
     self.env = env
     self.clip_actions = clip_actions
     self._sapg_embedding = None
+    self._observation_space = copy.deepcopy(self.env.observation_space)
 
     self.num_envs = self.unwrapped.num_envs
     self.device = torch.device(self.unwrapped.device)
@@ -28,6 +32,10 @@ class RslRlVecEnvWrapper(VecEnv):
       num_blocks = self.num_envs // block_size
       self._sapg_embedding = torch.linspace(50.0, 0.0, num_blocks, device=self.device).repeat_interleave(block_size)
       self._sapg_embedding = self._sapg_embedding[:, None].repeat(1, int(sapg_cfg["expl_reward_coef_embd_size"]))
+      if isinstance(self._observation_space, DictSpace):
+        for group in ("actor", "critic"):
+          space = self._observation_space.spaces[group]
+          space.shape = (*space.shape[:-1], space.shape[-1] + self._sapg_embedding.shape[-1])
     self._modify_action_space()
 
     # Reset at the start since rsl_rl does not call reset.
@@ -43,7 +51,7 @@ class RslRlVecEnvWrapper(VecEnv):
 
   @property
   def observation_space(self) -> Space:
-    return self.env.observation_space
+    return self._observation_space
 
   @property
   def action_space(self) -> Space:
