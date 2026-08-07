@@ -11,14 +11,23 @@ class RslRlVecEnvWrapper(VecEnv):
     self,
     env: ManagerBasedRlEnv,
     clip_actions: float | None = None,
+    sapg_cfg: dict | None = None,
   ):
     self.env = env
     self.clip_actions = clip_actions
+    self._sapg_embedding = None
 
     self.num_envs = self.unwrapped.num_envs
     self.device = torch.device(self.unwrapped.device)
     self.max_episode_length = self.unwrapped.max_episode_length
     self.num_actions = self.unwrapped.action_manager.total_action_dim
+    if sapg_cfg is not None:
+      block_size = int(sapg_cfg["expl_coef_block_size"])
+      if self.num_envs % block_size:
+        raise ValueError(f"num_envs {self.num_envs} must be divisible by block size {block_size}")
+      num_blocks = self.num_envs // block_size
+      self._sapg_embedding = torch.linspace(50.0, 0.0, num_blocks, device=self.device).repeat_interleave(block_size)
+      self._sapg_embedding = self._sapg_embedding[:, None].repeat(1, int(sapg_cfg["expl_reward_coef_embd_size"]))
     self._modify_action_space()
 
     # Reset at the start since rsl_rl does not call reset.
@@ -63,11 +72,11 @@ class RslRlVecEnvWrapper(VecEnv):
 
   def get_observations(self) -> TensorDict:
     obs_dict = self.unwrapped.observation_manager.compute()
-    return TensorDict(obs_dict, batch_size=[self.num_envs])
+    return self._add_sapg_embedding(TensorDict(obs_dict, batch_size=[self.num_envs]))
 
   def reset(self) -> tuple[TensorDict, dict]:
     obs_dict, extras = self.env.reset()
-    return TensorDict(obs_dict, batch_size=[self.num_envs]), extras
+    return self._add_sapg_embedding(TensorDict(obs_dict, batch_size=[self.num_envs])), extras
 
   def step(
     self, actions: torch.Tensor
@@ -82,7 +91,7 @@ class RslRlVecEnvWrapper(VecEnv):
     if not self.cfg.is_finite_horizon:
       extras["time_outs"] = truncated
     return (
-      TensorDict(obs_dict, batch_size=[self.num_envs]),
+      self._add_sapg_embedding(TensorDict(obs_dict, batch_size=[self.num_envs])),
       rew,
       dones,
       extras,
@@ -105,3 +114,12 @@ class RslRlVecEnvWrapper(VecEnv):
     self.unwrapped.action_space = batch_space(
       self.unwrapped.single_action_space, self.num_envs
     )
+
+  def _add_sapg_embedding(self, obs: TensorDict) -> TensorDict:
+    if self._sapg_embedding is None:
+      return obs
+    for group in ("actor", "critic"):
+      if group in obs:
+        tail = self._sapg_embedding.to(dtype=obs[group].dtype)
+        obs[group] = torch.cat((obs[group], tail), dim=-1)
+    return obs

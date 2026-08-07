@@ -126,6 +126,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
+rsl-rl-lib = { path = "../rsl_rl" }
 warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
 torch = [
   { index = "pytorch-cu128", extra = "cu128", marker = "sys_platform != 'darwin'" },

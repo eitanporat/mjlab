@@ -79,6 +79,8 @@ class RslRlPpoAlgorithmCfg:
   """Share CNN encoders between actor and critic."""
   class_name: str = "PPO"
   """Algorithm class name resolved by RSL-RL."""
+  sapg_cfg: dict[str, Any] | None = None
+  """Optional SAPG mixed-experience configuration."""
 
 
 @dataclass

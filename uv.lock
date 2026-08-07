@@ -1731,7 +1731,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "onnxscript", specifier = ">=0.5.4" },
     { name = "prettytable" },
-    { name = "rsl-rl-lib", specifier = "==5.4.2" },
+    { name = "rsl-rl-lib", directory = "../rsl_rl" },
     { name = "scipy", specifier = ">=1.15" },
     { name = "tensorboard", specifier = ">=2.20.0" },
     { name = "tensordict" },
@@ -3226,7 +3226,7 @@ wheels = [
 [[package]]
 name = "rsl-rl-lib"
 version = "5.4.2"
-source = { registry = "https://pypi.org/simple" }
+source = { directory = "../rsl_rl" }
 dependencies = [
     { name = "gitpython" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-mjlab-cpu' and extra == 'extra-5-mjlab-cu128')" },
@@ -3242,9 +3242,17 @@ dependencies = [
     { name = "torchvision", version = "0.24.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or extra != 'extra-5-mjlab-cpu' or (extra == 'extra-5-mjlab-cpu' and extra == 'extra-5-mjlab-cu128')" },
     { name = "torchvision", version = "0.25.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-5-mjlab-cpu') or (extra == 'extra-5-mjlab-cpu' and extra == 'extra-5-mjlab-cu128')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/a6/11460213f75318253ae20d792802faa0c3cfe2b49e29ec785e590cd81eaa/rsl_rl_lib-5.4.2.tar.gz", hash = "sha256:688e881db7f7af06d12e5498fd6f0c41b0e2f858dc0667f5fd68219c86b9667d", size = 66011, upload-time = "2026-07-15T09:45:34.847Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/fa/7f4da9b79f98c1f6d899b80723da8ede4c408a30f5a832ce8e94f92c1052/rsl_rl_lib-5.4.2-py3-none-any.whl", hash = "sha256:8fe07f6746df351f23467e0825e17e776835cb172d7e3fdf806120774bab61a3", size = 92923, upload-time = "2026-07-15T09:45:33.579Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "gitpython" },
+    { name = "numpy", specifier = ">=1.16.4" },
+    { name = "onnx" },
+    { name = "onnxscript", specifier = ">=0.5.4" },
+    { name = "tensorboard" },
+    { name = "tensordict", specifier = ">=0.7.0" },
+    { name = "torch", specifier = ">=2.6.0" },
+    { name = "torchvision", specifier = ">=0.5.0" },
 ]
 
 [[package]]

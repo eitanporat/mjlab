@@ -145,7 +145,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     )
     print("[INFO] Recording videos during training.")
 
-  env = RslRlVecEnvWrapper(env, clip_actions=cfg.agent.clip_actions)
+  env = RslRlVecEnvWrapper(
+    env,
+    clip_actions=cfg.agent.clip_actions,
+    sapg_cfg=cfg.agent.algorithm.sapg_cfg if hasattr(cfg.agent, "algorithm") else None,
+  )
 
   agent_cfg = asdict(cfg.agent)
   env_cfg = asdict(cfg.env)
