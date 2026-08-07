@@ -56,6 +56,8 @@ class RslRlPpoAlgorithmCfg:
   """
   learning_rate: float = 1e-3
   """The learning rate."""
+  critic_learning_rate: float | None = None
+  """Fixed critic learning rate. If None, the critic follows the adaptive schedule."""
   schedule: Literal["adaptive", "fixed"] = "adaptive"
   """The learning rate schedule."""
   gamma: float = 0.99
