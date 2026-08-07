@@ -34,6 +34,12 @@ class RslRlModelCfg:
   """Hidden state dimension for the RNN."""
   rnn_num_layers: int = 1
   """Number of stacked RNN layers."""
+  rnn_layer_norm: bool = False
+  """Whether to apply layer normalization after the recurrent module."""
+  aux_value: bool = False
+  """Whether to add a value head sharing the model trunk."""
+  coefficient_embedding_cfg: dict[str, Any] | None = None
+  """Optional learned embedding replacing a scalar observation coefficient."""
   class_name: str = "MLPModel"
   """Model class name resolved by RSL-RL (MLPModel, CNNModel, or RNNModel)."""
 
@@ -64,6 +70,16 @@ class RslRlPpoAlgorithmCfg:
   """The maximum gradient norm for the policy."""
   value_loss_coef: float = 1.0
   """The coefficient for the value loss."""
+  aux_value_loss_coef: float = 0.0
+  """The coefficient for an actor-trunk auxiliary value loss."""
+  reward_scale: float = 1.0
+  """Scale environment and intrinsic rewards before computing returns."""
+  normalize_value: bool = False
+  """Whether to normalize value targets with running statistics."""
+  bounds_loss_coef: float | None = None
+  """Optional coefficient for the continuous-action bound loss."""
+  mixed_precision: bool = False
+  """Whether to use CUDA automatic mixed precision."""
   use_clipped_value_loss: bool = True
   """Whether to use clipped value loss."""
   clip_param: float = 0.2
@@ -104,7 +120,7 @@ class RslRlBaseRunnerCfg:
   """Optional label appended to the timestamped run directory
   (e.g. ``2025-01-27_14-30-00_{run_name}``). Also becomes the
   display name for the run in wandb."""
-  logger: Literal["wandb", "tensorboard"] = "wandb"
+  logger: str | dict[str, Any] = "wandb"
   """The logger to use. Default is wandb."""
   wandb_project: str = "mjlab"
   """The wandb project name."""

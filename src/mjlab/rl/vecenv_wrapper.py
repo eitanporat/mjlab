@@ -28,14 +28,26 @@ class RslRlVecEnvWrapper(VecEnv):
     if sapg_cfg is not None:
       block_size = int(sapg_cfg["expl_coef_block_size"])
       if self.num_envs % block_size:
-        raise ValueError(f"num_envs {self.num_envs} must be divisible by block size {block_size}")
+        raise ValueError(
+          f"num_envs {self.num_envs} must be divisible by block size {block_size}"
+        )
       num_blocks = self.num_envs // block_size
-      self._sapg_embedding = torch.linspace(50.0, 0.0, num_blocks, device=self.device).repeat_interleave(block_size)
-      self._sapg_embedding = self._sapg_embedding[:, None].repeat(1, int(sapg_cfg["expl_reward_coef_embd_size"]))
+      self._sapg_embedding = torch.linspace(
+        50.0, 0.0, num_blocks, device=self.device
+      ).repeat_interleave(block_size)
+      embedding_size = (
+        1
+        if "learn_param" in sapg_cfg["expl_type"]
+        else int(sapg_cfg["expl_reward_coef_embd_size"])
+      )
+      self._sapg_embedding = self._sapg_embedding[:, None].repeat(1, embedding_size)
       if isinstance(self._observation_space, DictSpace):
         for group in ("actor", "critic"):
           space = self._observation_space.spaces[group]
-          space.shape = (*space.shape[:-1], space.shape[-1] + self._sapg_embedding.shape[-1])
+          space.shape = (
+            *space.shape[:-1],
+            space.shape[-1] + self._sapg_embedding.shape[-1],
+          )
     self._modify_action_space()
 
     # Reset at the start since rsl_rl does not call reset.
@@ -84,7 +96,9 @@ class RslRlVecEnvWrapper(VecEnv):
 
   def reset(self) -> tuple[TensorDict, dict]:
     obs_dict, extras = self.env.reset()
-    return self._add_sapg_embedding(TensorDict(obs_dict, batch_size=[self.num_envs])), extras
+    return self._add_sapg_embedding(
+      TensorDict(obs_dict, batch_size=[self.num_envs])
+    ), extras
 
   def step(
     self, actions: torch.Tensor

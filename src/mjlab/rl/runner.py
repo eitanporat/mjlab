@@ -26,8 +26,15 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
         for opt in ("cnn_cfg", "distribution_cfg"):
           if train_cfg[key].get(opt) is None:
             train_cfg[key].pop(opt, None)
+        if not train_cfg[key].get("aux_value"):
+          train_cfg[key].pop("aux_value", None)
         if train_cfg[key].get("rnn_type") is None:
-          for opt in ("rnn_type", "rnn_hidden_dim", "rnn_num_layers"):
+          for opt in (
+            "rnn_type",
+            "rnn_hidden_dim",
+            "rnn_num_layers",
+            "rnn_layer_norm",
+          ):
             train_cfg[key].pop(opt, None)
     super().__init__(env, train_cfg, log_dir, device)
 
