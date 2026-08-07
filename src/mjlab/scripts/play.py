@@ -180,7 +180,13 @@ def run_play(task_id: str, cfg: PlayConfig):
       disable_logger=True,
     )
 
-  env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+  # Mirror train.py: a SAPG checkpoint expects the exploration coefficient
+  # appended to its observations, so without this the policy is one input short.
+  env = RslRlVecEnvWrapper(
+    env,
+    clip_actions=agent_cfg.clip_actions,
+    sapg_cfg=getattr(getattr(agent_cfg, "algorithm", None), "sapg_cfg", None),
+  )
   if DUMMY_MODE:
     action_shape: tuple[int, ...] = env.unwrapped.action_space.shape
     if cfg.agent == "zero":
