@@ -56,13 +56,13 @@ class PlayConfig:
   _demo_mode: tyro.conf.Suppress[bool] = False
 
 
-def run_play(task_id: str, cfg: PlayConfig):
+def run_play(task_id: str, cfg: PlayConfig, agent_cfg_override=None):
   configure_torch_backends()
 
   device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
 
   env_cfg = load_env_cfg(task_id, play=True)
-  agent_cfg = load_rl_cfg(task_id)
+  agent_cfg = agent_cfg_override or load_rl_cfg(task_id)
 
   DUMMY_MODE = cfg.agent in {"zero", "random"}
   TRAINED_MODE = not DUMMY_MODE
