@@ -46,7 +46,7 @@ class PlayConfig:
   video_height: int | None = None
   video_width: int | None = None
   camera: int | str | None = None
-  viewer: Literal["auto", "native", "viser"] = "auto"
+  viewer: Literal["auto", "native", "viser", "none"] = "auto"
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
   log_root: str = "logs/rsl_rl"
@@ -212,6 +212,13 @@ def run_play(task_id: str, cfg: PlayConfig, agent_cfg_override=None):
       str(resume_path), load_cfg={"actor": True}, strict=True, map_location=device
     )
     policy = runner.get_inference_policy(device=device)
+
+  if cfg.viewer == "none":
+    with torch.inference_mode():
+      for _ in range(cfg.video_length):
+        env.step(policy(env.get_observations()))
+    env.close()
+    return
 
   # Build checkpoint manager for hot-swapping checkpoints in the viewer.
   ckpt_manager: CheckpointManager | None = None
