@@ -387,18 +387,8 @@ class ManagerBasedRlEnv:
     **Forward-call placement.** MuJoCo's ``mj_step`` runs forward kinematics *before*
     integration, so after stepping, derived quantities (``xpos``, ``xquat``,
     ``site_xpos``, ``cvel``, ``sensordata``) lag ``qpos``/``qvel`` by one physics
-    substep. Rather than calling ``sim.forward()`` twice (once after the decimation
-    loop and once after the reset block), this method calls it **once**, right
-    before observation computation. This single call refreshes derived quantities
-    for *all* envs: non-reset envs pick up post-decimation kinematics, reset envs
-    pick up post-reset kinematics.
-
-    The tradeoff is that termination and reward managers see derived quantities that
-    are stale by one physics substep (the last ``mj_step`` ran ``mj_forward`` from
-    *pre*-integration ``qpos``). In practice, the staleness is negligible for reward
-    shaping and termination checks. Critically, the staleness is *consistent*: every
-    env, every step, always sees the same lag, so the MDP is well-defined and the
-    value function can learn the correct mapping.
+    substep. This method refreshes them before termination and reward evaluation;
+    reset environments receive a second refresh after their state is written.
 
     .. note::
 
@@ -430,9 +420,10 @@ class ManagerBasedRlEnv:
     self.episode_length_buf += 1
     self.common_step_counter += 1
 
+    # Refresh kinematics before termination and reward evaluation.
+    self.sim.forward()
+
     # Check terminations and compute rewards.
-    # NOTE: Derived quantities (xpos, xquat, ...) are stale by one physics
-    # substep here. See the docstring above for why this is acceptable.
     self.reset_buf = self.termination_manager.compute()
     self.reset_terminated = self.termination_manager.terminated
     self.reset_time_outs = self.termination_manager.time_outs
@@ -447,11 +438,8 @@ class ManagerBasedRlEnv:
       self._reset_idx(reset_env_ids)
       self.scene.write_data_to_sim()
 
-    # Single forward() call: recompute derived quantities from current
-    # qpos/qvel for every env. For non-reset envs this resolves the
-    # one-substep staleness left by mj_step; for reset envs it picks up
-    # the freshly written reset state.
-    self.sim.forward()
+    if len(reset_env_ids) > 0:
+      self.sim.forward()
 
     self.command_manager.compute(dt=self.step_dt)
 
