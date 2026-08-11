@@ -14,13 +14,13 @@ class RslRlModelCfg:
   """The activation function."""
   obs_normalization: bool = False
   """Whether to normalize the observations. Default is False."""
-  cnn_cfg: dict[str, Any] | None = None
+  cnn_cfg: Any = None
   """CNN encoder config. When set, class_name should be "CNNModel".
 
   Passed to ``rsl_rl.modules.CNN``. Common keys: output_channels,
   kernel_size, stride, padding, activation, global_pool, max_pool.
   """
-  distribution_cfg: dict[str, Any] | None = None
+  distribution_cfg: Any = None
   """Distribution config dict passed to rsl_rl. Example::
 
     {"class_name": "GaussianDistribution",
@@ -36,9 +36,11 @@ class RslRlModelCfg:
   """Number of stacked RNN layers."""
   rnn_layer_norm: bool = False
   """Whether to apply layer normalization after the recurrent module."""
+  rnn_before_mlp: bool = False
+  """Whether the recurrent module consumes observations before the MLP."""
   aux_value: bool = False
   """Whether to add a value head sharing the model trunk."""
-  coefficient_embedding_cfg: dict[str, Any] | None = None
+  coefficient_embedding_cfg: Any = None
   """Optional learned embedding replacing a scalar observation coefficient."""
   class_name: str = "MLPModel"
   """Model class name resolved by RSL-RL (MLPModel, CNNModel, or RNNModel)."""
@@ -97,7 +99,7 @@ class RslRlPpoAlgorithmCfg:
   """Share CNN encoders between actor and critic."""
   class_name: str = "PPO"
   """Algorithm class name resolved by RSL-RL."""
-  sapg_cfg: dict[str, Any] | None = None
+  sapg_cfg: Any = None
   """Optional SAPG mixed-experience configuration."""
 
 
@@ -122,7 +124,7 @@ class RslRlBaseRunnerCfg:
   """Optional label appended to the timestamped run directory
   (e.g. ``2025-01-27_14-30-00_{run_name}``). Also becomes the
   display name for the run in wandb."""
-  logger: str | dict[str, Any] = "wandb"
+  logger: Any = "wandb"
   """The logger to use. Default is wandb."""
   wandb_project: str = "mjlab"
   """The wandb project name."""
@@ -138,6 +140,8 @@ class RslRlBaseRunnerCfg:
   """The checkpoint file to load. Default is "model_.*.pt" (all). If regex expression,
   the latest (alphabetical order) matching file will be loaded.
   """
+  load_weights_only: bool = False
+  """Load actor and critic weights without optimizer state."""
   clip_actions: float | None = None
   """The clipping range for action values. If None (default), no clipping is applied."""
   upload_model: bool = True

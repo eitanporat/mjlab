@@ -174,7 +174,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    runner.load(str(resume_path))
+    load_cfg = {"actor": True, "critic": True, "optimizer": False, "iteration": False} if cfg.agent.load_weights_only else None
+    runner.load(str(resume_path), load_cfg=load_cfg)
 
   runner.learn(
     num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
