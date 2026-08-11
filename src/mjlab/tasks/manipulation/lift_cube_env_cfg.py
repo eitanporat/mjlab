@@ -1,5 +1,5 @@
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp import dr
+from mjlab.envs.mdp import dr, reset_scene_to_default
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
@@ -83,14 +83,9 @@ def make_lift_cube_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   events = {
-    # For positioning the base of the robot at env_origins.
-    "reset_base": EventTermCfg(
-      func=mdp.reset_root_state_uniform,
+    "reset_scene_to_default": EventTermCfg(
+      func=reset_scene_to_default,
       mode="reset",
-      params={
-        "pose_range": {},
-        "velocity_range": {},
-      },
     ),
     "reset_robot_joints": EventTermCfg(
       func=mdp.reset_joints_by_offset,

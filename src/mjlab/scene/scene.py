@@ -9,9 +9,11 @@ import mujoco
 import mujoco_warp as mjwarp
 import numpy as np
 import torch
+import tyro
 
 from mjlab.entity import Entity, EntityCfg
 from mjlab.entity.variants import VariantMetadata
+from mjlab.physics import PhysicsExtension
 from mjlab.sensor import BuiltinSensor, RayCastSensor, Sensor, SensorCfg
 from mjlab.sensor.camera_sensor import CameraSensor
 from mjlab.sensor.sensor_context import SensorContext
@@ -48,6 +50,11 @@ class SceneCfg:
   """Optional callback to modify the ``MjSpec`` after entities and sensors
   have been added but before compilation."""
 
+  physics_factory: tyro.conf.Suppress[
+    tyro.conf.Fixed[Callable[[int], tuple[PhysicsExtension, ...]] | None]
+  ] = None
+  """Factory for composable physics systems attached to this scene."""
+
 
 class Scene:
   def __init__(self, scene_cfg: SceneCfg, device: str) -> None:
@@ -58,6 +65,9 @@ class Scene:
     self._terrain: TerrainEntity | None = None
     self._default_env_origins: torch.Tensor | None = None
     self._sensor_context: SensorContext | None = None
+    self._physics = (
+      scene_cfg.physics_factory(scene_cfg.num_envs) if scene_cfg.physics_factory else ()
+    )
 
     self._spec = mujoco.MjSpec.from_file(str(_SCENE_XML))
     if self._cfg.extent is not None:
@@ -67,6 +77,8 @@ class Scene:
     self._add_sensors()
     if self._cfg.spec_fn is not None:
       self._cfg.spec_fn(self._spec)
+    for physics in self._physics:
+      physics.edit_spec(self._spec)
 
   def compile(self) -> mujoco.MjModel:
     return self._spec.compile()
@@ -119,6 +131,10 @@ class Scene:
   @property
   def sensors(self) -> dict[str, Sensor]:
     return self._sensors
+
+  @property
+  def physics(self) -> tuple[PhysicsExtension, ...]:
+    return self._physics
 
   @property
   def terrain(self) -> TerrainEntity | None:

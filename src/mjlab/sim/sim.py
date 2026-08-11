@@ -13,6 +13,7 @@ import warp as wp
 
 from mjlab.entity.variants import VARIANT_DEPENDENT_FIELDS, build_variant_model
 from mjlab.managers.event_manager import RecomputeLevel
+from mjlab.physics import PhysicsExtension
 from mjlab.sim.randomization import expand_model_fields
 from mjlab.sim.sim_data import TorchArray, WarpBridge
 from mjlab.utils.nan_guard import NanGuard, NanGuardCfg
@@ -231,11 +232,13 @@ class Simulation:
     *,
     spec: mujoco.MjSpec | None = None,
     variant_info: list[tuple[str, VariantMetadata]] | None = None,
+    physics: tuple[PhysicsExtension, ...] = (),
   ):
     self.cfg = cfg
     self.device = device
     self.wp_device = wp.get_device(self.device)
     self.num_envs = num_envs
+    self.physics = physics
     self._default_model_fields: dict[str, torch.Tensor] = {}
     # Fields whose DR baseline is per-world (DR's `_select_default_values`
     # uses this to know whether to index `[env, ...]` vs `[...]`).
@@ -337,6 +340,8 @@ class Simulation:
     )
     if self.cfg.warp_init_fn is not None:
       self.cfg.warp_init_fn(self._mj_model, self._wp_model, self._wp_data)
+    for physics in self.physics:
+      physics.initialize(self._mj_model, self._wp_model, self._wp_data)
 
     self._reset_mask_wp = wp.zeros(self.num_envs, dtype=bool)
     self._reset_mask = TorchArray(self._reset_mask_wp)
@@ -497,11 +502,19 @@ class Simulation:
 
   def step(self) -> None:
     with wp.ScopedDevice(self.wp_device):
+      for physics in self.physics:
+        physics.before_step()
       with self.nan_guard.watch(self.data):
         if self.use_cuda_graph and self.step_graph is not None:
           wp.capture_launch(self.step_graph)
         else:
           mjwarp.step(self.wp_model, self.wp_data)
+      for physics in self.physics:
+        physics.after_step()
+
+  def after_control_step(self) -> None:
+    for physics in self.physics:
+      physics.after_control_step()
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
     with wp.ScopedDevice(self.wp_device):
@@ -515,6 +528,8 @@ class Simulation:
         wp.capture_launch(self.reset_graph)
       else:
         mjwarp.reset_data(self.wp_model, self.wp_data, reset=self._reset_mask_wp)
+      for physics in self.physics:
+        physics.reset(self._reset_mask_wp)
 
   def set_sensor_context(self, ctx: SensorContext) -> None:
     """Wire a SensorContext for camera/raycast sensing.

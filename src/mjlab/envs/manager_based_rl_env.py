@@ -188,6 +188,8 @@ class ManagerBasedRlEnv:
     self._sim_step_counter = 0
     self.extras = {}
     self.obs_buf = {}
+    self.reward_manager: RewardManager | None = None
+    self.reward_buf = torch.zeros(cfg.scene.num_envs, device=device)
     self._manual_reset_pending = torch.zeros(
       self.cfg.scene.num_envs, dtype=torch.bool, device=device
     )
@@ -199,6 +201,7 @@ class ManagerBasedRlEnv:
       cfg=self.cfg.sim,
       spec=self.scene.spec,
       variant_info=self.scene.collect_variant_info(),
+      physics=self.scene.physics,
       device=device,
     )
 
@@ -422,6 +425,7 @@ class ManagerBasedRlEnv:
 
     # Refresh kinematics before termination and reward evaluation.
     self.sim.forward()
+    self.sim.after_control_step()
 
     # Check terminations and compute rewards.
     self.reset_buf = self.termination_manager.compute()
