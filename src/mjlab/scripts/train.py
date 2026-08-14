@@ -174,7 +174,16 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    load_cfg = {"actor": True, "critic": True, "optimizer": False, "iteration": False} if cfg.agent.load_weights_only else None
+    if cfg.agent.load_weights_only and cfg.agent.reset_optimizer_on_resume:
+      raise ValueError(
+        "load_weights_only and reset_optimizer_on_resume are mutually exclusive"
+      )
+    if cfg.agent.load_weights_only:
+      load_cfg = {"actor": True, "critic": True, "optimizer": False, "iteration": False}
+    elif cfg.agent.reset_optimizer_on_resume:
+      load_cfg = {"actor": True, "critic": True, "optimizer": False, "iteration": True}
+    else:
+      load_cfg = None
     runner.load(str(resume_path), load_cfg=load_cfg)
 
   runner.learn(

@@ -93,7 +93,7 @@ class RslRlPpoAlgorithmCfg:
   advantage is normalized over the mini-batches only. Otherwise, the advantage is
   normalized over the entire collected trajectories.
   """
-  optimizer: Literal["adam", "adamw", "sgd", "rmsprop"] = "adam"
+  optimizer: Literal["adam", "adamw", "muon", "sgd", "rmsprop"] = "adam"
   """The optimizer to use."""
   share_cnn_encoders: bool = False
   """Share CNN encoders between actor and critic."""
@@ -142,6 +142,8 @@ class RslRlBaseRunnerCfg:
   """
   load_weights_only: bool = False
   """Load actor and critic weights without optimizer state."""
+  reset_optimizer_on_resume: bool = False
+  """Resume training state and iteration while initializing a new optimizer."""
   clip_actions: float | None = None
   """The clipping range for action values. If None (default), no clipping is applied."""
   upload_model: bool = True
