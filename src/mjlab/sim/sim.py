@@ -10,6 +10,7 @@ import mujoco
 import mujoco_warp as mjwarp
 import torch
 import warp as wp
+from mujoco import MjModel
 
 from mjlab.entity.variants import VARIANT_DEPENDENT_FIELDS, build_variant_model
 from mjlab.managers.event_manager import RecomputeLevel
@@ -172,9 +173,7 @@ class SimulationCfg:
   """Bounding-volume filters applied during broadphase collision checking.
 
   If None, use the MuJoCo Warp default."""
-  warp_init_fn: Callable[[mujoco.MjModel, mjwarp.Model, mjwarp.Data], None] | None = (
-    None
-  )
+  warp_init_fn: Callable[[MjModel, mjwarp.Model, mjwarp.Data], None] | None = None
   """Optional Warp model/data initializer, called before CUDA graph capture."""
   ls_parallel: bool | None = None
   """Deprecated and ignored. Parallel linesearch was removed in MuJoCo Warp 3.10."""

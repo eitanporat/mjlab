@@ -133,6 +133,7 @@ class reward_curriculum:
   def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
     reward_name: str = cfg.params["reward_name"]
     stages: list[RewardCurriculumStage] = cfg.params["stages"]
+    assert env.reward_manager is not None
     self._term_cfg = env.reward_manager.get_term_cfg(reward_name)
     self._stages = stages
     _validate_stages(self._term_cfg, reward_name, self._stages)

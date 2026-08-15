@@ -1,4 +1,5 @@
 import copy
+from typing import cast
 
 import torch
 from rsl_rl.env import VecEnv
@@ -142,6 +143,7 @@ class RslRlVecEnvWrapper(VecEnv):
       return obs
     for group in ("actor", "critic"):
       if group in obs:
-        tail = self._sapg_embedding.to(dtype=obs[group].dtype)
-        obs[group] = torch.cat((obs[group], tail), dim=-1)
+        value = cast(torch.Tensor, obs[group])
+        tail = self._sapg_embedding.to(dtype=value.dtype)
+        obs[group] = torch.cat((value, tail), dim=-1)
     return obs

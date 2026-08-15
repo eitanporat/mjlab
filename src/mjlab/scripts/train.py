@@ -148,7 +148,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   env = RslRlVecEnvWrapper(
     env,
     clip_actions=cfg.agent.clip_actions,
-    sapg_cfg=cfg.agent.algorithm.sapg_cfg if hasattr(cfg.agent, "algorithm") else None,
+    sapg_cfg=getattr(getattr(cfg.agent, "algorithm", None), "sapg_cfg", None),
   )
 
   agent_cfg = asdict(cfg.agent)

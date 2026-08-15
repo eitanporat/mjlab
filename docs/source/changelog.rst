@@ -12,10 +12,15 @@ Upcoming version (not yet released)
      and ``priority`` to be explicit instead of silently defaulting to
      MuJoCo's values, and dict values for these fields must cover every
      matched geom (add a catch-all ``".*"`` entry).
+   - Removed the derived ``VariantMetadata.variant_mesh_names`` and
+     ``num_mesh_geoms`` compatibility views; use ``variant_slot_specs`` and
+     ``slots`` directly.
 
 Added
 ^^^^^
 
+- ``VariantEntityCfg`` now supports per-world primitive geom dimensions while
+  retaining identical primitive topology across variants.
 - Added ``SimulationCfg.warp_init_fn`` for installing MuJoCo Warp callbacks or
   fixed extension state from the host and Warp model before CUDA graph capture.
 - Added ``GeomCfg``, exposed as the ``geoms`` field on ``EntityCfg``, a spec

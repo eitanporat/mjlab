@@ -432,6 +432,7 @@ class ManagerBasedRlEnv:
     self.reset_terminated = self.termination_manager.terminated
     self.reset_time_outs = self.termination_manager.time_outs
 
+    assert self.reward_manager is not None
     self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
     self.metrics_manager.compute()
 
@@ -561,6 +562,7 @@ class ManagerBasedRlEnv:
     info = self.action_manager.reset(env_ids)
     self.extras["log"].update(info)
     # rewards manager.
+    assert self.reward_manager is not None
     info = self.reward_manager.reset(env_ids)
     self.extras["log"].update(info)
     # metrics manager.

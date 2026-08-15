@@ -94,7 +94,7 @@ def _variant_spec_fn_unset() -> mujoco.MjSpec:
 
 @dataclass
 class VariantEntityCfg(EntityCfg):
-  """Entity config for per-world mesh variants.
+  """Entity config for per-world geometry variants.
 
   Provide a dict of named variants (each value is a callable returning
   an ``MjSpec``) and optionally an ``assignment`` describing how worlds
@@ -102,7 +102,8 @@ class VariantEntityCfg(EntityCfg):
   geoms) is built automatically.
 
   All variants must share the same kinematic structure (same bodies,
-  joints, joint types). Only mesh geoms can differ.
+  joints, joint types, and primitive-geom topology). Mesh counts and geom
+  dimensions may differ.
 
   Variant assignment is fixed at ``Simulation`` initialization; it does
   not resample on episode reset.
@@ -222,9 +223,6 @@ class VariantMetadata:
   merged scene, which keeps construction cost linear in the number of
   variants instead of quadratic.
 
-  ``variant_mesh_names`` and ``num_mesh_geoms`` are kept as derived
-  ``@property`` views over ``variant_slot_specs`` for back-compat with
-  consumers that index by slot.
   """
 
   variant_names: tuple[str, ...]
@@ -232,32 +230,6 @@ class VariantMetadata:
   slots: tuple[VariantSlot, ...] = ()
   variant_slot_specs: tuple[tuple[VariantGeomSpec | None, ...], ...] = ()
   variant_source_specs: tuple[mujoco.MjSpec, ...] = ()
-
-  @property
-  def variant_mesh_names(self) -> tuple[tuple[str | None, ...], ...]:
-    """Per-variant slot-aligned mesh names with variant prefix.
-
-    ``None`` at position ``s`` means variant ``v`` does not fill slot
-    ``s``. Derived from ``variant_slot_specs``.
-    """
-    return tuple(
-      tuple(
-        None if ss is None else f"{self.variant_names[v_idx]}/{ss.mesh_name}"
-        for ss in slot_specs
-      )
-      for v_idx, slot_specs in enumerate(self.variant_slot_specs)
-    )
-
-  @property
-  def num_mesh_geoms(self) -> int:
-    """Max number of filled mesh slots across variants (i.e. the longest
-    variant's source mesh count). Derived from ``variant_slot_specs``."""
-    if not self.variant_slot_specs:
-      return 0
-    return max(
-      sum(1 for ss in slot_specs if ss is not None)
-      for slot_specs in self.variant_slot_specs
-    )
 
 
 @dataclass
@@ -1188,6 +1160,18 @@ def _populate_dependent_fields(
         )
       scene_geom_id_by_slot[slot.key] = gid
 
+    # Primitive topology is identical across variants. Resolve its scene IDs
+    # by body and order so unnamed primitives work as well as named ones.
+    scene_primitive_ids: dict[str, list[int]] = {}
+    for body_path, scene_bid in scene_body_id_by_path.items():
+      start = int(padded_model.body_geomadr[scene_bid])
+      stop = start + int(padded_model.body_geomnum[scene_bid])
+      scene_primitive_ids[body_path] = [
+        gid
+        for gid in range(start, stop)
+        if int(padded_model.geom_type[gid]) != int(mesh_type)
+      ]
+
     # Variant entity's root body (shortest body path), used to compute
     # the subtreemass delta to propagate to ancestors. The root path is
     # always the lex-smallest among the entity's body paths (parents
@@ -1236,6 +1220,22 @@ def _populate_dependent_fields(
         body_invweight0[worlds, scene_bid] = v_model.body_invweight0[source_bid]
         body_ipos[worlds, scene_bid] = v_model.body_ipos[source_bid]
         body_iquat[worlds, scene_bid] = v_model.body_iquat[source_bid]
+
+        source_start = int(v_model.body_geomadr[source_bid])
+        source_stop = source_start + int(v_model.body_geomnum[source_bid])
+        source_primitives = [
+          gid
+          for gid in range(source_start, source_stop)
+          if int(v_model.geom_type[gid]) != int(mesh_type)
+        ]
+        for scene_gid, source_gid in zip(
+          scene_primitive_ids[body_path], source_primitives, strict=True
+        ):
+          geom_size[worlds, scene_gid] = v_model.geom_size[source_gid]
+          geom_rbound[worlds, scene_gid] = v_model.geom_rbound[source_gid]
+          geom_aabb[worlds, scene_gid] = v_model.geom_aabb[source_gid].reshape(2, 3)
+          geom_pos[worlds, scene_gid] = v_model.geom_pos[source_gid]
+          geom_quat[worlds, scene_gid] = v_model.geom_quat[source_gid]
 
       # Scatter per-geom fields for each slot this variant fills. Map
       # each (body_path, role, ordinal) slot to the corresponding geom

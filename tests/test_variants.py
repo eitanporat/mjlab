@@ -289,7 +289,7 @@ def test_entity_builds_with_variants():
   meta = entity.variant_metadata
   assert meta is not None
   assert meta.variant_names == ("sphere", "cone")
-  assert meta.num_mesh_geoms == 1
+  assert len(meta.slots) == 1
   mesh_names = [m.name for m in entity.spec.meshes]
   assert any("sphere" in n for n in mesh_names)
   assert any("cone" in n for n in mesh_names)
@@ -306,11 +306,11 @@ def test_multi_geom_body_padding():
   entity = cfg.build()
   meta = entity.variant_metadata
   assert meta is not None
-  assert meta.num_mesh_geoms == 5  # max(3, 5)
+  assert len(meta.slots) == 5
   # Sphere: 3 real + 2 padding (None).
-  assert sum(1 for n in meta.variant_mesh_names[0] if n is None) == 2
+  assert sum(spec is None for spec in meta.variant_slot_specs[0]) == 2
   # Cone: 5 real, no padding.
-  assert all(n is not None for n in meta.variant_mesh_names[1])
+  assert all(spec is not None for spec in meta.variant_slot_specs[1])
 
 
 # Validation.
@@ -433,7 +433,10 @@ def _spec_with_actuator(actuator_name: str = "act") -> mujoco.MjSpec:
   return spec
 
 
-def _spec_with_primitive(primitive_role: str = "collision") -> mujoco.MjSpec:
+def _spec_with_primitive(
+  primitive_role: str = "collision",
+  size: tuple[float, float, float] = (0.05, 0.05, 0.05),
+) -> mujoco.MjSpec:
   """Sphere variant with an additional primitive box (visual or collision)."""
   spec = mujoco.MjSpec()
   m = spec.add_mesh(name="sphere")
@@ -443,7 +446,7 @@ def _spec_with_primitive(primitive_role: str = "collision") -> mujoco.MjSpec:
   box = body.add_geom()
   box.name = "primitive"
   box.type = mujoco.mjtGeom.mjGEOM_BOX
-  box.size = np.array([0.05, 0.05, 0.05])
+  box.size = np.asarray(size)
   if primitive_role == "visual":
     box.contype = 0
     box.conaffinity = 0
@@ -1200,6 +1203,29 @@ def test_dependent_fields_match_individual_compilation():
 
   # Sphere and cone should have different masses.
   assert not np.isclose(body_mass[sphere_w, obj_body], body_mass[cone_w, obj_body])
+
+
+def test_primitive_dimensions_are_variant_dependent():
+  def small():
+    return _spec_with_primitive(size=(0.02, 0.03, 0.04))
+
+  def large():
+    return _spec_with_primitive(size=(0.06, 0.07, 0.08))
+
+  scene_spec, variants = _build_scene_with_variants(small, large)
+  result = build_variant_model(scene_spec, 4, variants)
+
+  primitive = mujoco.mj_name2id(
+    result.mj_model, mujoco.mjtObj.mjOBJ_GEOM, "object/primitive"
+  )
+  sizes = result.wp_model.geom_size.numpy()
+  assignment = result.world_to_variant["object/"]
+  np.testing.assert_allclose(
+    sizes[assignment == 0, primitive], [[0.02, 0.03, 0.04]] * 2
+  )
+  np.testing.assert_allclose(
+    sizes[assignment == 1, primitive], [[0.06, 0.07, 0.08]] * 2
+  )
 
 
 def test_select_default_values_uses_per_world_variant_defaults():
