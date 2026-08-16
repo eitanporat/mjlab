@@ -58,7 +58,7 @@ class UniformVelocityCommand(CommandTerm):
   def command(self) -> torch.Tensor:
     return self.vel_command_b
 
-  def _update_metrics(self) -> None:
+  def update_metrics(self) -> None:
     max_command_time = self.cfg.resampling_time_range[1]
     max_command_step = max_command_time / self._env.step_dt
     self.metrics["error_vel_xy"] += (
@@ -72,7 +72,7 @@ class UniformVelocityCommand(CommandTerm):
       / max_command_step
     )
 
-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+  def resample_command(self, env_ids: torch.Tensor) -> None:
     r = torch.empty(len(env_ids), device=self.device)
     self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
     self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
@@ -113,7 +113,7 @@ class UniformVelocityCommand(CommandTerm):
       )
       self.robot.write_root_state_to_sim(root_state, init_vel_env_ids)
 
-  def _update_command(self) -> None:
+  def update_command(self) -> None:
     if self.cfg.heading_command:
       self.heading_error = wrap_to_pi(self.heading_target - self.robot.data.heading_w)
       env_ids = self.is_heading_env.nonzero(as_tuple=False).flatten()

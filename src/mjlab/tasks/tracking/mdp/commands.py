@@ -211,7 +211,7 @@ class MotionCommand(CommandTerm):
   def robot_anchor_ang_vel_w(self) -> torch.Tensor:
     return self.robot.data.body_link_ang_vel_w[:, self.robot_anchor_body_index]
 
-  def _update_metrics(self):
+  def update_metrics(self):
     self.metrics["error_anchor_pos"] = torch.norm(
       self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1
     )
@@ -316,7 +316,7 @@ class MotionCommand(CommandTerm):
     self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
     self.robot.reset(env_ids=env_ids)
 
-  def _resample_command(self, env_ids: torch.Tensor):
+  def resample_command(self, env_ids: torch.Tensor):
     if self.cfg.sampling_mode == "start":
       self.time_steps[env_ids] = 0
     elif self.cfg.sampling_mode == "uniform":
@@ -404,11 +404,11 @@ class MotionCommand(CommandTerm):
       delta_ori_w, self.body_pos_w - anchor_pos_w_repeat
     )
 
-  def _update_command(self):
+  def update_command(self):
     self.time_steps += 1
     env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
     if env_ids.numel() > 0:
-      self._resample_command(env_ids)
+      self.resample_command(env_ids)
       # _resample_command writes qpos/qvel but does not refresh derived
       # quantities; forward() so update_relative_body_poses reads the
       # post-teleport robot anchor instead of the stale pre-resample pose.

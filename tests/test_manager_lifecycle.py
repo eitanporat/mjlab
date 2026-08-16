@@ -71,13 +71,13 @@ class SpyCommand(CommandTerm):
   def command(self):
     return self.target[:, None]
 
-  def _update_metrics(self) -> None:
+  def update_metrics(self) -> None:
     self.observed_target.copy_(self.target)
 
-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+  def resample_command(self, env_ids: torch.Tensor) -> None:
     self.target[env_ids] += 1.0
 
-  def _update_command(self) -> None:
+  def update_command(self) -> None:
     pass
 
 

@@ -37,7 +37,7 @@ class LiftingCommand(CommandTerm):
   def command(self) -> torch.Tensor:
     return self.target_pos
 
-  def _update_metrics(self) -> None:
+  def update_metrics(self) -> None:
     object_pos_w = self.object.data.root_link_pos_w
     object_height = object_pos_w[:, 2]
     position_error = torch.norm(self.target_pos - object_pos_w, dim=-1)
@@ -55,7 +55,7 @@ class LiftingCommand(CommandTerm):
     position_error = self.metrics["position_error"]
     return position_error < self.cfg.success_threshold
 
-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+  def resample_command(self, env_ids: torch.Tensor) -> None:
     n = len(env_ids)
 
     # Reset episode success for resampled envs.
@@ -97,7 +97,7 @@ class LiftingCommand(CommandTerm):
       self.object.write_root_link_pose_to_sim(pose, env_ids=env_ids)
       self.object.write_root_link_velocity_to_sim(velocity, env_ids=env_ids)
 
-  def _update_command(self) -> None:
+  def update_command(self) -> None:
     pass
 
   def _debug_vis_impl(self, visualizer: DebugVisualizer) -> None:
@@ -170,7 +170,7 @@ class MultiCubeLiftingCommand(CommandTerm):
     """
     return self._cached_target_obj_pos
 
-  def _update_metrics(self) -> None:
+  def update_metrics(self) -> None:
     all_pos = torch.stack([c.data.root_link_pos_w for c in self.cubes])
     self._cached_target_obj_pos = all_pos[self.target_selection, self._env_arange]
     obj_pos = self._cached_target_obj_pos
@@ -184,7 +184,7 @@ class MultiCubeLiftingCommand(CommandTerm):
   def compute_success(self) -> torch.Tensor:
     return self.metrics["position_error"] < self.cfg.success_threshold
 
-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+  def resample_command(self, env_ids: torch.Tensor) -> None:
     n = len(env_ids)
     self.episode_success[env_ids] = 0.0
 
@@ -219,7 +219,7 @@ class MultiCubeLiftingCommand(CommandTerm):
       cube.write_root_link_pose_to_sim(pose, env_ids=env_ids)
       cube.write_root_link_velocity_to_sim(velocity, env_ids=env_ids)
 
-  def _update_command(self) -> None:
+  def update_command(self) -> None:
     pass
 
   def _debug_vis_impl(self, visualizer: DebugVisualizer) -> None:

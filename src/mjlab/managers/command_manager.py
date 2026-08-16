@@ -55,9 +55,6 @@ class CommandTerm(ManagerTermBase):
     self.command_counter = torch.zeros(
       self.num_envs, device=self.device, dtype=torch.long
     )
-    self._resample_requested = torch.zeros(
-      self.num_envs, device=self.device, dtype=torch.bool
-    )
     self._debug_vis_enabled: bool = True
 
   def debug_vis(self, visualizer: "DebugVisualizer") -> None:
@@ -106,56 +103,48 @@ class CommandTerm(ManagerTermBase):
       extras[metric_name] = torch.mean(metric_value[env_ids]).item()
       metric_value[env_ids] = 0.0
     self.command_counter[env_ids] = 0
-    self._resample_requested[env_ids] = False
-    self.time_left[env_ids] = self.time_left[env_ids].uniform_(
-      *self.cfg.resampling_time_range
-    )
-    self._reset_episode(env_ids)
+    self.sample_time(env_ids)
+    self.reset_episode(env_ids)
     return extras
+
+  def sample_time(self, env_ids: torch.Tensor) -> None:
+    values = torch.empty_like(env_ids, dtype=torch.float)
+    self.time_left[env_ids] = values.uniform_(*self.cfg.resampling_time_range)
 
   def observe_step(self) -> None:
     """Latch outcomes from the completed transition without changing targets."""
 
-    self._update_metrics()
+    self.update_metrics()
 
   def request_resample(self, env_ids: torch.Tensor) -> None:
-    """Queue target advancement for the post-reward lifecycle phase."""
-
-    self._resample_requested[env_ids] = True
+    self.time_left[env_ids] = 0.0
 
   def advance_step(self, dt: float) -> None:
     """Process queued/timed target changes after reward and metric capture."""
 
     self.time_left -= dt
-    resample_env_ids = (
-      self._resample_requested | (self.time_left <= 0.0)
-    ).nonzero().flatten()
+    resample_env_ids = (self.time_left <= 0.0).nonzero().flatten()
     if len(resample_env_ids) > 0:
-      self.time_left[resample_env_ids] = self.time_left[resample_env_ids].uniform_(
-        *self.cfg.resampling_time_range
-      )
-      self._resample_requested[resample_env_ids] = False
-      self._resample_command(resample_env_ids)
+      self.sample_time(resample_env_ids)
+      self.resample_command(resample_env_ids)
       self.command_counter[resample_env_ids] += 1
-    self._update_command()
+    self.update_command()
 
-  def _reset_episode(self, env_ids: torch.Tensor) -> None:
-    """Initialize an episode; subclasses may distinguish this from advancement."""
-
-    self._resample_command(env_ids)
+  def reset_episode(self, env_ids: torch.Tensor) -> None:
+    self.resample_command(env_ids)
 
   @abc.abstractmethod
-  def _update_metrics(self) -> None:
+  def update_metrics(self) -> None:
     """Update the metrics based on the current state."""
     raise NotImplementedError
 
   @abc.abstractmethod
-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+  def resample_command(self, env_ids: torch.Tensor) -> None:
     """Resample the command for the specified environments."""
     raise NotImplementedError
 
   @abc.abstractmethod
-  def _update_command(self) -> None:
+  def update_command(self) -> None:
     """Update the command based on the current state."""
     raise NotImplementedError
 
@@ -276,9 +265,6 @@ class CommandManager(ManagerBase):
     for term in self._terms.values():
       term.advance_step(dt)
 
-  def request_resample(self, name: str, env_ids: torch.Tensor) -> None:
-    self._terms[name].request_resample(env_ids)
-
   def get_command(self, name: str) -> torch.Tensor:
     return self._terms[name].command
 
@@ -353,9 +339,6 @@ class NullCommandManager:
     pass
 
   def advance_step(self, dt: float) -> None:
-    pass
-
-  def request_resample(self, name: str, env_ids: torch.Tensor) -> None:
     pass
 
   def get_command(self, name: str) -> None:
