@@ -15,6 +15,8 @@ class RslRlVecEnvWrapper(VecEnv):
     env: ManagerBasedRlEnv,
     clip_actions: float | None = None,
     sapg_cfg: dict | None = None,
+    *,
+    reset_on_init: bool = True,
   ):
     self.env = env
     self.clip_actions = clip_actions
@@ -50,8 +52,8 @@ class RslRlVecEnvWrapper(VecEnv):
           )
     self._modify_action_space()
 
-    # Reset at the start since rsl_rl does not call reset.
-    self.env.reset()
+    if reset_on_init:
+      self.env.reset(advance_curriculum=False)
 
   @property
   def cfg(self) -> ManagerBasedRlEnvCfg:
@@ -90,12 +92,22 @@ class RslRlVecEnvWrapper(VecEnv):
   def seed(self, seed: int = -1) -> int:
     return self.unwrapped.seed(seed)
 
+  def set_condition_values(self, values: torch.Tensor) -> None:
+    """Assign checkpoint conditions to equally sized environment blocks."""
+    if self._sapg_embedding is None:
+      raise RuntimeError("condition values require SAPG observations")
+    values = values.to(device=self.device).flatten()
+    if self.num_envs % len(values):
+      raise ValueError("environment count must be divisible by condition count")
+    per_env = values.repeat_interleave(self.num_envs // len(values))[:, None]
+    self._sapg_embedding.copy_(per_env.expand_as(self._sapg_embedding))
+
   def get_observations(self) -> TensorDict:
     obs_dict = self.unwrapped.observation_manager.compute()
     return self._add_sapg_embedding(TensorDict(obs_dict, batch_size=[self.num_envs]))
 
   def reset(self) -> tuple[TensorDict, dict]:
-    obs_dict, extras = self.env.reset()
+    obs_dict, extras = self.env.reset(advance_curriculum=False)
     return self._add_sapg_embedding(
       TensorDict(obs_dict, batch_size=[self.num_envs])
     ), extras

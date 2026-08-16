@@ -98,8 +98,8 @@ def env(device):
   env.close()
 
 
-def test_runner_persists_common_step_counter(env, device, monkeypatch):
-  """MjlabOnPolicyRunner should save and restore common_step_counter."""
+def test_runner_persists_training_state_and_metadata(env, device, monkeypatch):
+  """Current checkpoints restore the complete environment training state."""
   wrapped_env = RslRlVecEnvWrapper(env)
   agent_cfg = RslRlOnPolicyRunnerCfg(
     num_steps_per_env=4, max_iterations=10, save_interval=5
@@ -111,15 +111,22 @@ def test_runner_persists_common_step_counter(env, device, monkeypatch):
     )
     monkeypatch.setattr(runner.logger, "save_model", lambda *args, **kwargs: None)
     runner.logger.logger_type = "tensorboard"  # Normally set in learn().
+    runner.checkpoint_metadata = {"profile": "test"}
 
     wrapped_env.unwrapped.common_step_counter = 12345
+    wrapped_env.unwrapped._sim_step_counter = 678
     checkpoint_path = str(Path(tmpdir) / "test_checkpoint.pt")
     runner.save(checkpoint_path)
 
     wrapped_env.unwrapped.common_step_counter = 0
+    wrapped_env.unwrapped._sim_step_counter = 0
     runner.load(checkpoint_path)
 
     assert wrapped_env.unwrapped.common_step_counter == 12345
+    assert wrapped_env.unwrapped._sim_step_counter == 678
+    assert torch.load(checkpoint_path, weights_only=False)["infos"][
+      "checkpoint_metadata"
+    ] == {"profile": "test"}
 
 
 def test_runner_handles_old_checkpoints_without_env_state(env, device):
@@ -146,9 +153,22 @@ def test_runner_handles_old_checkpoints_without_env_state(env, device):
     torch.save(old_checkpoint, checkpoint_path)
 
     wrapped_env.unwrapped.common_step_counter = 999
-    runner.load(checkpoint_path)
+    runner.load(checkpoint_path, restore_training_state=False)
 
     assert wrapped_env.unwrapped.common_step_counter == 999
+
+
+def test_wrapper_applies_selected_condition_values(env):
+  wrapped = RslRlVecEnvWrapper(
+    env,
+    sapg_cfg={
+      "expl_coef_block_size": 1,
+      "expl_type": "mixed_expl_learn_param",
+      "expl_reward_coef_embd_size": 32,
+    },
+  )
+  wrapped.set_condition_values(torch.tensor([7.0, 3.0]))
+  assert wrapped.get_observations()["actor"][:, -1].tolist() == [7.0, 3.0]
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
