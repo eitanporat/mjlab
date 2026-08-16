@@ -14,7 +14,8 @@ from mjlab.managers.manager_base import ManagerBase, ManagerTermBaseCfg
 if TYPE_CHECKING:
   from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnv
 
-REDUCE_OPTIONS = ("last", "max", "mean", "sum")
+REDUCE_OPTIONS = ("last", "max", "mean", "min", "sum")
+KIND_OPTIONS = ("scalar", "counter", "category")
 
 
 @dataclass(kw_only=True)
@@ -40,7 +41,8 @@ class MetricsTermCfg(ManagerTermBaseCfg):
   """
 
   per_substep: bool = False
-  reduce: Literal["last", "max", "mean", "sum"] = "mean"
+  reduce: Literal["last", "max", "mean", "min", "sum"] = "mean"
+  kind: Literal["scalar", "counter", "category"] = "scalar"
 
 
 class MetricsManager(ManagerBase):
@@ -66,6 +68,7 @@ class MetricsManager(ManagerBase):
 
     self._episode_sums: dict[str, torch.Tensor] = {}
     self._episode_max: dict[str, torch.Tensor] = {}
+    self._episode_min: dict[str, torch.Tensor] = {}
     for idx, term_name in enumerate(self._term_names):
       if self._term_cfgs[idx].reduce not in REDUCE_OPTIONS:
         msg = (
@@ -73,6 +76,11 @@ class MetricsManager(ManagerBase):
           f"is unknown. Valid options are {REDUCE_OPTIONS}."
         )
         raise ValueError(msg)
+      if self._term_cfgs[idx].kind not in KIND_OPTIONS:
+        raise ValueError(
+          f"The metric kind {self._term_cfgs[idx].kind!r} for {term_name!r} "
+          f"is unknown. Valid options are {KIND_OPTIONS}."
+        )
 
       self._episode_sums[term_name] = torch.zeros(
         self.num_envs, dtype=torch.float, device=self.device
@@ -82,17 +90,23 @@ class MetricsManager(ManagerBase):
         self._episode_max[term_name] = torch.full(
           (self.num_envs,), float("-inf"), dtype=torch.float, device=self.device
         )
+      elif self._term_cfgs[idx].reduce == "min":
+        self._episode_min[term_name] = torch.full(
+          (self.num_envs,), float("inf"), dtype=torch.float, device=self.device
+        )
     # Pre-resolved tensor refs for substep terms to avoid dict lookups in
     # the hot loop.
     self._substep_accum: list[torch.Tensor] = []
     self._substep_episode_sums: list[torch.Tensor] = []
     self._substep_episode_max: list[torch.Tensor | None] = []
+    self._substep_episode_min: list[torch.Tensor | None] = []
     for idx in self._substep_term_indices:
       name = self._term_names[idx]
       buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
       self._substep_accum.append(buf)
       self._substep_episode_sums.append(self._episode_sums[name])
       self._substep_episode_max.append(self._episode_max.get(name))
+      self._substep_episode_min.append(self._episode_min.get(name))
     self._substep_count: int = 0
     self._step_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self._step_values = torch.zeros(
@@ -124,29 +138,18 @@ class MetricsManager(ManagerBase):
   ) -> dict[str, torch.Tensor]:
     if env_ids is None:
       env_ids = slice(None)
-    extras = {}
-    counts = self._step_count[env_ids].float()
-    # Avoid division by zero for envs that haven't stepped.
-    safe_counts = torch.clamp(counts, min=1.0)
-    for idx, key in enumerate(self._episode_sums):
-      reduce = self._term_cfgs[idx].reduce
-      if reduce == "max":
-        extras["Episode_Metrics/" + key] = torch.mean(self._episode_max[key][env_ids])
-        self._episode_max[key][env_ids] = float("-inf")
-
-      elif reduce == "last":
-        extras["Episode_Metrics/" + key] = torch.mean(self._step_values[env_ids, idx])
-
-      elif reduce == "sum":
-        extras["Episode_Metrics/" + key] = torch.mean(self._episode_sums[key][env_ids])
-
-      else:
-        extras["Episode_Metrics/" + key] = torch.mean(
-          self._episode_sums[key][env_ids] / safe_counts
-        )
-
+    values = self.episode_values(env_ids)
+    extras = {
+      "Episode_Metrics/" + key: torch.mean(value) for key, value in values.items()
+    }
+    for key in self._episode_sums:
       self._episode_sums[key][env_ids] = 0.0
+      if key in self._episode_max:
+        self._episode_max[key][env_ids] = float("-inf")
+      if key in self._episode_min:
+        self._episode_min[key][env_ids] = float("inf")
     self._step_count[env_ids] = 0
+    self._step_values[env_ids] = 0.0
 
     for buf in self._substep_accum:
       buf[env_ids] = 0.0
@@ -155,6 +158,30 @@ class MetricsManager(ManagerBase):
       term_cfg.func.reset(env_ids=env_ids)
 
     return extras
+
+  def episode_values(
+    self, env_ids: torch.Tensor | slice | None = None
+  ) -> dict[str, torch.Tensor]:
+    """Return device-native episode reductions without consuming them."""
+
+    if env_ids is None:
+      env_ids = slice(None)
+    safe_counts = self._step_count[env_ids].float().clamp_min(1.0)
+    values: dict[str, torch.Tensor] = {}
+    for idx, key in enumerate(self._episode_sums):
+      reduce = self._term_cfgs[idx].reduce
+      if reduce == "max":
+        value = self._episode_max[key][env_ids]
+      elif reduce == "min":
+        value = self._episode_min[key][env_ids]
+      elif reduce == "last":
+        value = self._step_values[env_ids, idx]
+      elif reduce == "sum":
+        value = self._episode_sums[key][env_ids]
+      else:
+        value = self._episode_sums[key][env_ids] / safe_counts
+      values[key] = value.clone()
+    return values
 
   def compute_substep(self) -> None:
     """Accumulate per-substep metric values inside the decimation loop.
@@ -178,6 +205,9 @@ class MetricsManager(ManagerBase):
         max_buf = self._substep_episode_max[i]
         if max_buf is not None:
           torch.maximum(max_buf, avg, out=max_buf)
+        min_buf = self._substep_episode_min[i]
+        if min_buf is not None:
+          torch.minimum(min_buf, avg, out=min_buf)
         self._substep_accum[i].zero_()
       self._substep_count = 0
     for idx in self._step_term_indices:
@@ -187,6 +217,8 @@ class MetricsManager(ManagerBase):
       self._step_values[:, idx] = value
       if name in self._episode_max:
         torch.maximum(self._episode_max[name], value, out=self._episode_max[name])
+      if name in self._episode_min:
+        torch.minimum(self._episode_min[name], value, out=self._episode_min[name])
 
   def get_active_iterable_terms(
     self, env_idx: int
@@ -218,6 +250,10 @@ class MetricsManager(ManagerBase):
     term_cfg = self._term_cfgs[idx]
     value = term_cfg.func(self._env, **term_cfg.params)
     self._check_term_shape(name, value)
+    if term_cfg.kind == "counter":
+      torch._assert_async(
+        (value >= 0).all(), f"Counter metric {name!r} returned a negative value"
+      )
     return value
 
 
@@ -240,6 +276,11 @@ class NullMetricsManager:
     return []
 
   def reset(self, env_ids: torch.Tensor | None = None) -> dict[str, float]:
+    return {}
+
+  def episode_values(
+    self, env_ids: torch.Tensor | slice | None = None
+  ) -> dict[str, torch.Tensor]:
     return {}
 
   def compute_substep(self) -> None:

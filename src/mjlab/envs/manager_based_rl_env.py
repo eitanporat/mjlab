@@ -188,6 +188,8 @@ class ManagerBasedRlEnv:
     self._sim_step_counter = 0
     self.extras = {}
     self.obs_buf = {}
+    self.reward_manager: RewardManager | None = None
+    self.reward_buf = torch.zeros(cfg.scene.num_envs, device=device)
     self._manual_reset_pending = torch.zeros(
       self.cfg.scene.num_envs, dtype=torch.bool, device=device
     )
@@ -199,8 +201,10 @@ class ManagerBasedRlEnv:
       cfg=self.cfg.sim,
       spec=self.scene.spec,
       variant_info=self.scene.collect_variant_info(),
+      physics=self.scene.physics_cfgs,
       device=device,
     )
+    self.scene.bind_physics(self.sim.physics)
 
     self.scene.initialize(
       mj_model=self.sim.mj_model,
@@ -358,6 +362,7 @@ class ManagerBasedRlEnv:
     *,
     seed: int | None = None,
     env_ids: torch.Tensor | None = None,
+    advance_curriculum: bool = False,
     options: dict[str, Any] | None = None,
   ) -> tuple[types.VecEnvObs, dict]:
     del options  # Unused.
@@ -366,10 +371,9 @@ class ManagerBasedRlEnv:
     if seed is not None:
       self.seed(seed)
     self.extras["log"] = dict()
-    self._reset_idx(env_ids)
+    self._reset_idx(env_ids, advance_curriculum=advance_curriculum)
     self.scene.write_data_to_sim()
     self.sim.forward()
-    self.command_manager.compute(dt=0.0)
     self.sim.sense()
     self.obs_buf = self.observation_manager.compute(update_history=True)
     self.recorder_manager.record_post_reset(env_ids)
@@ -422,31 +426,44 @@ class ManagerBasedRlEnv:
 
     # Refresh kinematics before termination and reward evaluation.
     self.sim.forward()
+    self.sim.after_control_step()
+    self.command_manager.observe_step()
 
     # Check terminations and compute rewards.
     self.reset_buf = self.termination_manager.compute()
     self.reset_terminated = self.termination_manager.terminated
     self.reset_time_outs = self.termination_manager.time_outs
 
+    assert self.reward_manager is not None
     self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
     self.metrics_manager.compute()
 
-    # Reset envs that terminated/timed-out and log the episode info.
+    # Capture completed episodes before any manager consumes/reset its state.
     reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-    if self.cfg.auto_reset and len(reset_env_ids) > 0:
-      self.recorder_manager.record_pre_reset(reset_env_ids)
-      self._reset_idx(reset_env_ids)
-      self.scene.write_data_to_sim()
-
     if len(reset_env_ids) > 0:
-      self.sim.forward()
+      self.extras["episode"] = self.metrics_manager.episode_values(reset_env_ids)
+      self.extras["episode"].update(
+        {
+          f"termination/{name}": self.termination_manager.get_term(name)[
+            reset_env_ids
+          ].clone()
+          for name in self.termination_manager.active_terms
+        }
+      )
+      self.recorder_manager.record_pre_reset(reset_env_ids)
 
-    self.command_manager.compute(dt=self.step_dt)
+    # Goal changes occur only after termination, reward, metric, and trace capture.
+    self.command_manager.advance_step(dt=self.step_dt)
 
     if "step" in self.event_manager.available_modes:
       self.event_manager.apply(mode="step", dt=self.step_dt)
     if "interval" in self.event_manager.available_modes:
       self.event_manager.apply(mode="interval", dt=self.step_dt)
+
+    if self.cfg.auto_reset and len(reset_env_ids) > 0:
+      self._reset_idx(reset_env_ids, advance_curriculum=True)
+      self.scene.write_data_to_sim()
+      self.sim.forward()
 
     self.sim.sense()
     self.obs_buf = self.observation_manager.compute(update_history=True)
@@ -538,8 +555,43 @@ class ManagerBasedRlEnv:
     self.observation_space = batch_space(self.single_observation_space, self.num_envs)
     self.action_space = batch_space(self.single_action_space, self.num_envs)
 
-  def _reset_idx(self, env_ids: torch.Tensor | None = None) -> None:
-    self.curriculum_manager.compute(env_ids=env_ids)
+  def training_state_dict(self) -> dict[str, Any]:
+    """Return versioned state that affects future training transitions."""
+
+    return {
+      "schema_version": 1,
+      "common_step_counter": self.common_step_counter,
+      "sim_step_counter": self._sim_step_counter,
+      "curriculum": self.curriculum_manager.training_state_dict(),
+    }
+
+  def load_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Restore training state before the first post-resume reset."""
+
+    self.validate_training_state_dict(state)
+    self.common_step_counter = int(state["common_step_counter"])
+    self._sim_step_counter = int(state["sim_step_counter"])
+    self.curriculum_manager.load_training_state_dict(state["curriculum"])
+
+  def validate_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Validate continuation state without mutating the environment."""
+
+    if state.get("schema_version") != 1:
+      raise ValueError("Unsupported environment training-state schema")
+    if not isinstance(state.get("common_step_counter"), int):
+      raise TypeError("common_step_counter must be an integer")
+    if not isinstance(state.get("sim_step_counter"), int):
+      raise TypeError("sim_step_counter must be an integer")
+    self.curriculum_manager.validate_training_state_dict(state["curriculum"])
+
+  def _reset_idx(
+    self,
+    env_ids: torch.Tensor | None = None,
+    *,
+    advance_curriculum: bool = False,
+  ) -> None:
+    if advance_curriculum:
+      self.curriculum_manager.compute(env_ids=env_ids)
     self.sim.reset(env_ids)
     self.scene.reset(env_ids)
 
@@ -557,6 +609,7 @@ class ManagerBasedRlEnv:
     info = self.action_manager.reset(env_ids)
     self.extras["log"].update(info)
     # rewards manager.
+    assert self.reward_manager is not None
     info = self.reward_manager.reset(env_ids)
     self.extras["log"].update(info)
     # metrics manager.

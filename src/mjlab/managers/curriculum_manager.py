@@ -116,6 +116,52 @@ class CurriculumManager(ManagerBase):
       state = term_cfg.func(self._env, env_ids, **term_cfg.params)
       self._curriculum_state[name] = state
 
+  def training_state_dict(self) -> dict[str, Any]:
+    """Serialize sufficient statistics owned by stateful curriculum terms."""
+
+    terms: dict[str, Any] = {}
+    for name, cfg in zip(self._term_names, self._term_cfgs, strict=True):
+      if hasattr(cfg.func, "training_state_dict"):
+        terms[name] = cfg.func.training_state_dict()
+    return {
+      "schema_version": 1,
+      "reported_state": deepcopy(self._curriculum_state),
+      "terms": terms,
+    }
+
+  def load_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Restore stateful terms before an initial non-advancing reset."""
+
+    self.validate_training_state_dict(state)
+    saved_terms = state["terms"]
+    for name, cfg in zip(self._term_names, self._term_cfgs, strict=True):
+      if name in saved_terms:
+        cfg.func.load_training_state_dict(saved_terms[name])
+    self._curriculum_state = deepcopy(state["reported_state"])
+
+  def validate_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Validate a saved curriculum before any runner state is changed."""
+
+    if state.get("schema_version") != 1:
+      raise ValueError("Unsupported curriculum training-state schema")
+    if not isinstance(state.get("terms"), dict):
+      raise TypeError("Curriculum terms state must be a dictionary")
+    if not isinstance(state.get("reported_state"), dict):
+      raise TypeError("Curriculum reported state must be a dictionary")
+    saved_terms = state["terms"]
+    known_terms = set(self._term_names)
+    if set(saved_terms) - known_terms:
+      raise ValueError(
+        f"Unknown curriculum terms in checkpoint: {sorted(set(saved_terms) - known_terms)}"
+      )
+    for name, cfg in zip(self._term_names, self._term_cfgs, strict=True):
+      if name in saved_terms:
+        if not hasattr(cfg.func, "load_training_state_dict"):
+          raise ValueError(f"Curriculum term {name!r} cannot restore saved state")
+        validator = getattr(cfg.func, "validate_training_state_dict", None)
+        if validator is not None:
+          validator(saved_terms[name])
+
   def _prepare_terms(self):
     for term_name, term_cfg in self.cfg.items():
       term_cfg: CurriculumTermCfg | None
@@ -153,3 +199,13 @@ class NullCurriculumManager:
 
   def compute(self, env_ids: torch.Tensor | None = None) -> None:
     pass
+
+  def training_state_dict(self) -> dict[str, Any]:
+    return {"schema_version": 1, "reported_state": {}, "terms": {}}
+
+  def load_training_state_dict(self, state: dict[str, Any]) -> None:
+    self.validate_training_state_dict(state)
+
+  def validate_training_state_dict(self, state: dict[str, Any]) -> None:
+    if state != {"schema_version": 1, "reported_state": {}, "terms": {}}:
+      raise ValueError("Null curriculum manager cannot restore nonempty state")
