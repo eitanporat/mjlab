@@ -94,7 +94,7 @@ def _variant_spec_fn_unset() -> mujoco.MjSpec:
 
 @dataclass
 class VariantEntityCfg(EntityCfg):
-  """Entity config for per-world mesh variants.
+  """Entity config for per-world geometry variants.
 
   Provide a dict of named variants (each value is a callable returning
   an ``MjSpec``) and optionally an ``assignment`` describing how worlds
@@ -102,7 +102,8 @@ class VariantEntityCfg(EntityCfg):
   geoms) is built automatically.
 
   All variants must share the same kinematic structure (same bodies,
-  joints, joint types). Only mesh geoms can differ.
+  joints, joint types, and primitive-geom topology). Mesh counts and geom
+  dimensions may differ.
 
   Variant assignment is fixed at ``Simulation`` initialization; it does
   not resample on episode reset.
@@ -1188,6 +1189,18 @@ def _populate_dependent_fields(
         )
       scene_geom_id_by_slot[slot.key] = gid
 
+    # Primitive topology is shared by all variants. Resolve scene IDs by body
+    # and authored order so unnamed primitives are supported as well.
+    scene_primitive_ids: dict[str, list[int]] = {}
+    for body_path, scene_bid in scene_body_id_by_path.items():
+      start = int(padded_model.body_geomadr[scene_bid])
+      stop = start + int(padded_model.body_geomnum[scene_bid])
+      scene_primitive_ids[body_path] = [
+        gid
+        for gid in range(start, stop)
+        if int(padded_model.geom_type[gid]) != int(mesh_type)
+      ]
+
     # Variant entity's root body (shortest body path), used to compute
     # the subtreemass delta to propagate to ancestors. The root path is
     # always the lex-smallest among the entity's body paths (parents
@@ -1236,6 +1249,22 @@ def _populate_dependent_fields(
         body_invweight0[worlds, scene_bid] = v_model.body_invweight0[source_bid]
         body_ipos[worlds, scene_bid] = v_model.body_ipos[source_bid]
         body_iquat[worlds, scene_bid] = v_model.body_iquat[source_bid]
+
+        source_start = int(v_model.body_geomadr[source_bid])
+        source_stop = source_start + int(v_model.body_geomnum[source_bid])
+        source_primitives = [
+          gid
+          for gid in range(source_start, source_stop)
+          if int(v_model.geom_type[gid]) != int(mesh_type)
+        ]
+        for scene_gid, source_gid in zip(
+          scene_primitive_ids[body_path], source_primitives, strict=True
+        ):
+          geom_size[worlds, scene_gid] = v_model.geom_size[source_gid]
+          geom_rbound[worlds, scene_gid] = v_model.geom_rbound[source_gid]
+          geom_aabb[worlds, scene_gid] = v_model.geom_aabb[source_gid].reshape(2, 3)
+          geom_pos[worlds, scene_gid] = v_model.geom_pos[source_gid]
+          geom_quat[worlds, scene_gid] = v_model.geom_quat[source_gid]
 
       # Scatter per-geom fields for each slot this variant fills. Map
       # each (body_path, role, ordinal) slot to the corresponding geom
