@@ -4,15 +4,18 @@ import gc
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Callable, Literal, cast
 
 import mujoco
 import mujoco_warp as mjwarp
 import torch
 import warp as wp
+from mujoco import MjModel
 
 from mjlab.entity.variants import VARIANT_DEPENDENT_FIELDS, build_variant_model
 from mjlab.managers.event_manager import RecomputeLevel
+from mjlab.physics import PhysicsContext, PhysicsExtension, PhysicsExtensionCfg
 from mjlab.sim.randomization import expand_model_fields
 from mjlab.sim.sim_data import TorchArray, WarpBridge
 from mjlab.utils.nan_guard import NanGuard, NanGuardCfg
@@ -171,9 +174,7 @@ class SimulationCfg:
   """Bounding-volume filters applied during broadphase collision checking.
 
   If None, use the MuJoCo Warp default."""
-  warp_init_fn: Callable[[mujoco.MjModel, mjwarp.Model, mjwarp.Data], None] | None = (
-    None
-  )
+  warp_init_fn: Callable[[MjModel, mjwarp.Model, mjwarp.Data], None] | None = None
   """Optional Warp model/data initializer, called before CUDA graph capture."""
   ls_parallel: bool | None = None
   """Deprecated and ignored. Parallel linesearch was removed in MuJoCo Warp 3.10."""
@@ -231,11 +232,14 @@ class Simulation:
     *,
     spec: mujoco.MjSpec | None = None,
     variant_info: list[tuple[str, VariantMetadata]] | None = None,
+    physics: dict[str, PhysicsExtensionCfg] | None = None,
   ):
     self.cfg = cfg
     self.device = device
     self.wp_device = wp.get_device(self.device)
     self.num_envs = num_envs
+    self.physics_cfgs = dict(physics or {})
+    self.physics: dict[str, PhysicsExtension] = {}
     self._default_model_fields: dict[str, torch.Tensor] = {}
     # Fields whose DR baseline is per-world (DR's `_select_default_values`
     # uses this to know whether to index `[env, ...]` vs `[...]`).
@@ -309,6 +313,12 @@ class Simulation:
         ).clone()
       self._per_world_default_fields.update(VARIANT_DEPENDENT_FIELDS)
 
+      for prefix, arr in result.world_to_variant.items():
+        key = prefix.rstrip("/")
+        self._world_to_variant[key] = torch.as_tensor(
+          arr, dtype=torch.long, device=self.device
+        )
+
       self._finish_init()
 
     # Register variant-dependent fields as expanded so the native
@@ -316,15 +326,6 @@ class Simulation:
     self._expanded_fields.update(VARIANT_DEPENDENT_FIELDS)
     self._expanded_fields.add("geom_dataid")
     self._expanded_fields.add("geom_matid")
-
-    # Stash variant assignments as torch tensors keyed by bare entity name
-    # (build_variant_model emits "<name>/" prefixes; strip the trailing slash for
-    # the public API).
-    for prefix, arr in result.world_to_variant.items():
-      key = prefix.rstrip("/")
-      self._world_to_variant[key] = torch.as_tensor(
-        arr, dtype=torch.long, device=self.device
-      )
 
   def _finish_init(self) -> None:
     """Common initialization after warp model is created."""
@@ -337,6 +338,17 @@ class Simulation:
     )
     if self.cfg.warp_init_fn is not None:
       self.cfg.warp_init_fn(self._mj_model, self._wp_model, self._wp_data)
+    context = PhysicsContext(
+      host_model=self._mj_model,
+      device_model=self._wp_model,
+      device_data=self._wp_data,
+      num_worlds=self.num_envs,
+      device=self.device,
+      world_variants=MappingProxyType(self._world_to_variant),
+    )
+    self.physics = {
+      name: cfg.build(context) for name, cfg in self.physics_cfgs.items()
+    }
 
     self._reset_mask_wp = wp.zeros(self.num_envs, dtype=bool)
     self._reset_mask = TorchArray(self._reset_mask_wp)
@@ -497,11 +509,19 @@ class Simulation:
 
   def step(self) -> None:
     with wp.ScopedDevice(self.wp_device):
+      for physics in self.physics.values():
+        physics.before_physics_step()
       with self.nan_guard.watch(self.data):
         if self.use_cuda_graph and self.step_graph is not None:
           wp.capture_launch(self.step_graph)
         else:
           mjwarp.step(self.wp_model, self.wp_data)
+      for physics in self.physics.values():
+        physics.after_physics_step()
+
+  def after_control_step(self) -> None:
+    for physics in self.physics.values():
+      physics.after_control_step()
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
     with wp.ScopedDevice(self.wp_device):
@@ -515,6 +535,8 @@ class Simulation:
         wp.capture_launch(self.reset_graph)
       else:
         mjwarp.reset_data(self.wp_model, self.wp_data, reset=self._reset_mask_wp)
+      for physics in self.physics.values():
+        physics.reset(self._reset_mask_wp)
 
   def set_sensor_context(self, ctx: SensorContext) -> None:
     """Wire a SensorContext for camera/raycast sensing.
