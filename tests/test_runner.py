@@ -158,6 +158,31 @@ def test_runner_handles_old_checkpoints_without_env_state(env, device):
     assert wrapped_env.unwrapped.common_step_counter == 999
 
 
+def test_runner_restores_rng_when_checkpoint_has_more_gpus(env, device, monkeypatch):
+  wrapped_env = RslRlVecEnvWrapper(env)
+  agent_cfg = RslRlOnPolicyRunnerCfg(
+    num_steps_per_env=4, max_iterations=10, save_interval=5
+  )
+  with tempfile.TemporaryDirectory() as tmpdir:
+    runner = MjlabOnPolicyRunner(
+      wrapped_env, asdict(agent_cfg), log_dir=tmpdir, device=device
+    )
+    runner.logger.logger_type = "tensorboard"
+    checkpoint_path = str(Path(tmpdir) / "multi_gpu_checkpoint.pt")
+    runner.save(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    checkpoint["infos"]["rng_state"]["torch_cuda"] = [torch.get_rng_state()] * 4
+    torch.save(checkpoint, checkpoint_path)
+    restore = MagicMock()
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "set_rng_state_all", restore)
+
+    runner.load(checkpoint_path)
+
+    assert len(restore.call_args.args[0]) == 1
+
+
 def test_wrapper_applies_selected_condition_values(env):
   wrapped = RslRlVecEnvWrapper(
     env,

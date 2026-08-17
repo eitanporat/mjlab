@@ -126,6 +126,6 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
       np.random.set_state(rng["numpy"])
       torch.set_rng_state(rng["torch_cpu"])
       if torch.cuda.is_available() and rng["torch_cuda"]:
-        torch.cuda.set_rng_state_all(rng["torch_cuda"])
+        torch.cuda.set_rng_state_all(rng["torch_cuda"][: torch.cuda.device_count()])
     self.env.unwrapped.reset(advance_curriculum=False)
     return infos
