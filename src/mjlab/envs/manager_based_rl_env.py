@@ -559,9 +559,10 @@ class ManagerBasedRlEnv:
     """Return versioned state that affects future training transitions."""
 
     return {
-      "schema_version": 1,
+      "schema_version": 2,
       "common_step_counter": self.common_step_counter,
       "sim_step_counter": self._sim_step_counter,
+      "events": self.event_manager.training_state_dict(),
       "curriculum": self.curriculum_manager.training_state_dict(),
     }
 
@@ -571,17 +572,23 @@ class ManagerBasedRlEnv:
     self.validate_training_state_dict(state)
     self.common_step_counter = int(state["common_step_counter"])
     self._sim_step_counter = int(state["sim_step_counter"])
+    if state["schema_version"] >= 2:
+      self.event_manager.load_training_state_dict(state["events"])
     self.curriculum_manager.load_training_state_dict(state["curriculum"])
 
   def validate_training_state_dict(self, state: dict[str, Any]) -> None:
     """Validate continuation state without mutating the environment."""
 
-    if state.get("schema_version") != 1:
+    if state.get("schema_version") not in (1, 2):
       raise ValueError("Unsupported environment training-state schema")
     if not isinstance(state.get("common_step_counter"), int):
       raise TypeError("common_step_counter must be an integer")
     if not isinstance(state.get("sim_step_counter"), int):
       raise TypeError("sim_step_counter must be an integer")
+    if state["schema_version"] >= 2:
+      if not isinstance(state.get("events"), dict):
+        raise TypeError("events must be a dictionary")
+      self.event_manager.validate_training_state_dict(state["events"])
     self.curriculum_manager.validate_training_state_dict(state["curriculum"])
 
   def _reset_idx(

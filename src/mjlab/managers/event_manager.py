@@ -6,7 +6,7 @@ import enum
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 from prettytable import PrettyTable
@@ -213,6 +213,81 @@ class EventManager(ManagerBase):
         index = self._mode_term_names[mode].index(term_name)
         return self._mode_term_cfgs[mode][index]
     raise ValueError(f"Event term '{term_name}' not found in active terms.")
+
+  def training_state_dict(self) -> dict[str, Any]:
+    """Serialize stateful event terms and event scheduling state."""
+    terms: dict[str, Any] = {}
+    for mode in self._mode_term_names:
+      for name, cfg in zip(
+        self._mode_term_names[mode], self._mode_term_cfgs[mode], strict=True
+      ):
+        if hasattr(cfg.func, "training_state_dict"):
+          terms[name] = cfg.func.training_state_dict()
+    return {
+      "schema_version": 1,
+      "terms": terms,
+      "interval_time_left": [value.clone() for value in self._interval_term_time_left],
+      "reset_last_triggered": [
+        value.clone() for value in self._reset_term_last_triggered_step_id
+      ],
+      "reset_triggered_once": [
+        value.clone() for value in self._reset_term_last_triggered_once
+      ],
+    }
+
+  def validate_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Validate event continuation state without mutating the manager."""
+    if state.get("schema_version") != 1:
+      raise ValueError("Unsupported event training-state schema")
+    saved_terms = state.get("terms")
+    if not isinstance(saved_terms, dict):
+      raise TypeError("Event terms state must be a dictionary")
+    expected = {
+      name
+      for mode, names in self._mode_term_names.items()
+      for name, cfg in zip(names, self._mode_term_cfgs[mode], strict=True)
+      if hasattr(cfg.func, "training_state_dict")
+    }
+    if set(saved_terms) != expected:
+      raise ValueError(
+        "Event checkpoint stateful terms do not match: "
+        f"expected {sorted(expected)}, got {sorted(saved_terms)}"
+      )
+    for name, saved in saved_terms.items():
+      func = self.get_term_cfg(name).func
+      if not hasattr(func, "load_training_state_dict"):
+        raise ValueError(f"Event term {name!r} cannot restore saved state")
+      validator = getattr(func, "validate_training_state_dict", None)
+      if validator is not None:
+        validator(saved)
+    for key, current in (
+      ("interval_time_left", self._interval_term_time_left),
+      ("reset_last_triggered", self._reset_term_last_triggered_step_id),
+      ("reset_triggered_once", self._reset_term_last_triggered_once),
+    ):
+      saved = state.get(key)
+      if not isinstance(saved, list) or len(saved) != len(current):
+        raise ValueError(f"Event checkpoint {key!r} has the wrong length")
+      if any(
+        not isinstance(source, torch.Tensor)
+        or source.shape != target.shape
+        or source.dtype != target.dtype
+        for source, target in zip(saved, current, strict=True)
+      ):
+        raise ValueError(f"Event checkpoint {key!r} has incompatible tensors")
+
+  def load_training_state_dict(self, state: dict[str, Any]) -> None:
+    """Restore stateful event terms and event scheduling state."""
+    self.validate_training_state_dict(state)
+    for name, saved in state["terms"].items():
+      self.get_term_cfg(name).func.load_training_state_dict(saved)
+    for key, current in (
+      ("interval_time_left", self._interval_term_time_left),
+      ("reset_last_triggered", self._reset_term_last_triggered_step_id),
+      ("reset_triggered_once", self._reset_term_last_triggered_once),
+    ):
+      for target, source in zip(current, state[key], strict=True):
+        target.copy_(source)
 
   def reset(self, env_ids: torch.Tensor | None = None):
     for mode_cfg in self._mode_class_term_cfgs.values():

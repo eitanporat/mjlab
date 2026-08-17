@@ -16,6 +16,9 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added checkpoint save/restore support for stateful event terms and event
+  interval/reset scheduling state. Environment continuation checkpoints now include
+  event-manager state while remaining compatible with the previous schema.
 - Added ``SimulationCfg.warp_init_fn`` for installing MuJoCo Warp callbacks or
   fixed extension state from the host and Warp model before CUDA graph capture.
 - Added ``GeomCfg``, exposed as the ``geoms`` field on ``EntityCfg``, a spec

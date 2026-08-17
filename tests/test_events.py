@@ -195,6 +195,71 @@ def test_recompute_not_called_when_no_dr_fired(device):
   env.sim.recompute_constants.assert_not_called()
 
 
+def test_event_training_state_roundtrip_includes_terms_and_schedulers(device):
+  """Stateful reset terms and trigger timers resume exactly."""
+
+  class StatefulEvent:
+    def __init__(self, cfg, env):
+      del cfg
+      self.values = torch.zeros(env.num_envs, device=env.device)
+
+    def __call__(self, env, env_ids):
+      del env
+      self.values[env_ids] += 1
+
+    def training_state_dict(self):
+      return {"values": self.values.clone()}
+
+    def validate_training_state_dict(self, state):
+      value = state.get("values")
+      if not isinstance(value, torch.Tensor) or value.shape != self.values.shape:
+        raise ValueError("bad stateful-event values")
+
+    def load_training_state_dict(self, state):
+      self.validate_training_state_dict(state)
+      self.values.copy_(state["values"])
+
+  env = Mock()
+  env.num_envs = 2
+  env.device = device
+  env.scene = {}
+  env.sim = Mock()
+  manager = EventManager(
+    {
+      "stateful": EventTermCfg(mode="reset", func=StatefulEvent),
+      "periodic": EventTermCfg(
+        mode="interval",
+        func=lambda env, env_ids: None,
+        interval_range_s=(1.0, 2.0),
+      ),
+    },
+    env,
+  )
+  ids = torch.tensor([0], device=device)
+  manager.apply("reset", env_ids=ids, global_env_step_count=7)
+  manager._interval_term_time_left[0].copy_(torch.tensor([0.25, 0.75], device=device))
+  saved = manager.training_state_dict()
+
+  term = manager.get_term_cfg("stateful").func
+  term.values.fill_(99)
+  manager._interval_term_time_left[0].zero_()
+  manager._reset_term_last_triggered_step_id[0].zero_()
+  manager._reset_term_last_triggered_once[0].zero_()
+  manager.load_training_state_dict(saved)
+
+  torch.testing.assert_close(term.values, torch.tensor([1.0, 0.0], device=device))
+  torch.testing.assert_close(
+    manager._interval_term_time_left[0], torch.tensor([0.25, 0.75], device=device)
+  )
+  assert manager._reset_term_last_triggered_step_id[0].tolist() == [7, 0]
+  assert manager._reset_term_last_triggered_once[0].tolist() == [True, False]
+
+  missing = dict(saved)
+  missing["terms"] = {}
+  with pytest.raises(ValueError, match="stateful terms do not match"):
+    manager.validate_training_state_dict(missing)
+
+
 # ===========================================================================
 # Section 2: PD gains & effort limits
 # ===========================================================================
