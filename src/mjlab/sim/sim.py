@@ -336,6 +336,7 @@ class Simulation:
       nconmax=self.cfg.nconmax,
       njmax=self.cfg.njmax,
     )
+    self.step_trace: mjwarp.StepTrace | None = None
     if self.cfg.warp_init_fn is not None:
       self.cfg.warp_init_fn(self._mj_model, self._wp_model, self._wp_data)
     context = PhysicsContext(
@@ -383,7 +384,10 @@ class Simulation:
     if self.use_cuda_graph:
       with _suspend_gc(), wp.ScopedDevice(self.wp_device):
         with wp.ScopedCapture() as capture:
-          mjwarp.step(self.wp_model, self.wp_data)
+          if self.step_trace is None:
+            mjwarp.step(self.wp_model, self.wp_data)
+          else:
+            mjwarp.trace_step(self.wp_model, self.wp_data, self.step_trace)
         self.step_graph = capture.graph
         with wp.ScopedCapture() as capture:
           mjwarp.forward(self.wp_model, self.wp_data)
@@ -514,10 +518,23 @@ class Simulation:
       with self.nan_guard.watch(self.data):
         if self.use_cuda_graph and self.step_graph is not None:
           wp.capture_launch(self.step_graph)
+        elif self.step_trace is not None:
+          mjwarp.trace_step(self.wp_model, self.wp_data, self.step_trace)
         else:
           mjwarp.step(self.wp_model, self.wp_data)
       for physics in self.physics.values():
         physics.after_physics_step()
+
+  def enable_step_trace(self) -> mjwarp.StepTrace:
+    """Record exact MJWarp inputs, contacts, forces, and outputs for each step."""
+    self.step_trace = mjwarp.StepTrace.create(self.wp_data)
+    self.create_graph()
+    return self.step_trace
+
+  def disable_step_trace(self) -> None:
+    """Return to the uninstrumented simulation step."""
+    self.step_trace = None
+    self.create_graph()
 
   def after_control_step(self) -> None:
     for physics in self.physics.values():

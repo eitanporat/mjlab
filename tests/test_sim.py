@@ -158,6 +158,20 @@ def test_sim_reset_restores_initial_state(robot_xml, device):
   assert (sim.data.qacc_warmstart == 0).all()
 
 
+def test_sim_step_trace(robot_xml, device):
+  model = mujoco.MjModel.from_xml_string(robot_xml)
+  sim = Simulation(num_envs=2, cfg=SimulationCfg(), model=model, device=device)
+  before = sim.data.qvel.clone()
+
+  trace = sim.enable_step_trace()
+  sim.step()
+
+  torch.testing.assert_close(torch.asarray(trace.qvel_before), before)
+  torch.testing.assert_close(torch.asarray(trace.qvel_after), sim.data.qvel[:])
+  sim.disable_step_trace()
+  assert sim.step_trace is None
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Likely bug on CPU MjWarp")
 def test_sim_reset_selective(robot_xml, device):
   """Test that sim.reset() only affects specified environments."""
