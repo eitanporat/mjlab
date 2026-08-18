@@ -909,16 +909,19 @@ def build_merged_variant_spec(
     list(spec.worldbody.bodies)[0] for spec in variant_specs
   ]
 
-  # Variant entities must be floating-base. Mocap auto-wrap is not applied
-  # for variant entities, so fixed-base variants would silently stack at
-  # the world origin. Variants share joint structure (validated above), so
-  # checking the first is sufficient.
+  # Variant entities normally need a floating base.  Explicit mocap roots are
+  # also safe: unlike an unmarked fixed body they retain an independently
+  # writable per-world pose and Entity applies cfg.init_state to that root.
+  # Variants share joint structure (validated above), so checking the first is
+  # sufficient for the floating-base case.
   ref_joints = list(variant_bodies[0].joints)
-  if not ref_joints or ref_joints[0].type != mujoco.mjtJoint.mjJNT_FREE:
+  floating_base = bool(ref_joints) and ref_joints[0].type == mujoco.mjtJoint.mjJNT_FREE
+  explicit_mocap = not ref_joints and all(body.mocap for body in variant_bodies)
+  if not (floating_base or explicit_mocap):
     raise ValueError(
-      "VariantEntityCfg requires floating-base variants. Each variant's "
-      "root body must declare a free joint via body.add_freejoint(); "
-      "fixed-base variants are not supported."
+      "VariantEntityCfg requires either floating-base variants whose root "
+      "declares a free joint, or fixed-base variants whose root is explicitly "
+      "marked mocap."
     )
 
   # Compute slot-based metadata from source specs BEFORE any mesh
